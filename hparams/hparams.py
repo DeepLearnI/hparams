@@ -57,12 +57,12 @@ class HParams(LocalConfig):
             if global_rank == 0:
                 os.makedirs(logdir, exist_ok=True)
                 self.save_config(logfile)
-                with open(sentinal_file, 'w') as f:
+                with open(sentinel_file, 'w') as f:
                     f.write('okay')
                 print('No existing config found. New run config file saved in {}'.format(logfile))
             else:
                 start_time = time.time()
-                while not os.path.isfile(sentinal_file):
+                while not os.path.isfile(sentinel_file):
                     if time.time() - start_time > timeout:
                         raise TimeoutError(f"Rank {global_rank} timed out waiting for {logfile} after {timeout}s")
                     time.sleep(0.1)
