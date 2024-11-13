@@ -67,7 +67,7 @@ class HParams(LocalConfig):
                         raise TimeoutError(f"Rank {global_rank} timed out waiting for {logfile} after {timeout}s")
                     time.sleep(0.1)
 
-                super(Hparams, self).__init__()
+                super(HParams, self).__init__()
                 self.read(logfile)
                 print(f'Rank {global_rank} loaded new config from {logfile}')
 
