@@ -3,7 +3,6 @@ import io
 from contextlib import redirect_stderr
 import argparse
 import os
-import gcsfs
 import time
 
 
@@ -29,6 +28,11 @@ class HParams(LocalConfig):
         self.read(os.path.join(project_path, f"{hparams_filename}.cfg"))
 
         if gcs_backup_project is not None:
+            try:
+                import gcsfs
+            except ImportError:
+                raise ImportError("gcsfs is required for GCS backup. Install with: pip install hparams[gcs]")
+
             if gcs_backup_bucket is None:
                 raise ValueError(f"GCS bucket must be provided to conduct gcs backup!")
 
