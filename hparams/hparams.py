@@ -4,12 +4,21 @@ from contextlib import redirect_stderr
 import argparse
 import os
 import gcsfs
+import time
 
 
 class HParams(LocalConfig):
     _loaded_hparams_objects = {}
 
-    def __init__(self, project_path, hparams_filename="hparams", gcs_backup_project=None, gcs_backup_bucket=None, name="hparams"):
+    def __init__(self,
+                 project_path,
+                 hparams_filename="hparams",
+                 gcs_backup_project=None,
+                 gcs_backup_bucket=None,
+                 name="hparams",
+                 global_rank=0,
+                 timeout=20,
+                 ):
         if name in HParams._loaded_hparams_objects.keys():
             raise ValueError(f"hparams {name} is being loaded a second time")
 
@@ -34,23 +43,35 @@ class HParams(LocalConfig):
 
         # self.update(params_to_override)
 
-        logdir = os.path.join(project_path, 'logs-{}'.format(self.run.name))
-        os.makedirs(logdir, exist_ok=True)
-        logfile = os.path.join(logdir, 'hparams-{}.cfg'.format(self.run.name))
+        logdir = os.path.join(project_path, 'logs', self.run.name)
+        logfile = os.path.join(logdir, 'hparams.cfg')
+        sentinel_file = os.path.join(logdir, '.hparams_file_is_written')
 
-        if os.path.isdir(logdir) and os.path.isfile(logfile):
+        if os.path.isdir(logdir) and os.path.isfile(logfile) and os.path.isfile(sentinel_file):
             # If logfile is found, assume we are resuming as old run, so use archived hparams file
             super(HParams, self).__init__()
             self.read(logfile)
             # self.update(params_to_override)
             print('Found existing {}! Resuming run using primary parameters!'.format(logfile))
         else:
-            # New run
-            # Keep a version of the updated config file as backup for replicability
-            self.save_config(logfile)
-            print('No existing config found. New run config file saved in {}'.format(logfile))
+            if global_rank == 0:
+                os.makedirs(logdir, exist_ok=True)
+                self.save_config(logfile)
+                with open(sentinel_file, 'w') as f:
+                    f.write('okay')
+                print('No existing config found. New run config file saved in {}'.format(logfile))
+            else:
+                start_time = time.time()
+                while not os.path.isfile(sentinel_file):
+                    if time.time() - start_time > timeout:
+                        raise TimeoutError(f"Rank {global_rank} timed out waiting for {logfile} after {timeout}s")
+                    time.sleep(0.1)
 
-        if gcs_fs is not None:
+                super(HParams, self).__init__()
+                self.read(logfile)
+                print(f'Rank {global_rank} loaded new config from {logfile}')
+
+        if gcs_fs is not None and global_rank == 0:
             gcs_path = os.path.join(gcs_backup_bucket, os.path.basename(logfile))
             print(f'Backing up hparams file to {gcs_path}')
             gcs_fs.put(lpath=logfile, rpath=gcs_path)
