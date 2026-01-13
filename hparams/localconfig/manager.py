@@ -5,7 +5,10 @@ import re
 import sys
 import configparser
 
-from hparams.localconfig.utils import is_float, is_int, is_bool, is_none, is_config, CONFIG_KEY_RE, to_bool
+from hparams.localconfig.utils import (
+    is_float, is_int, is_bool, is_none, is_config, CONFIG_KEY_RE, to_bool,
+    CONFIG_KEY_TYPE_RE, validate_type, parse_type_hint
+)
 
 NON_ALPHA_NUM = re.compile('[^A-Za-z0-9]')
 RAISE_ERROR_WHEN_NOT_FOUND = True
@@ -99,7 +102,10 @@ class LocalConfig(object):
 
         #: Cache to avoid transforming value too many times
         self._value_cache = {}
-        
+
+        #: A dict that maps (section, key) to its type hint string
+        self._type_hints = {}
+
         # Load sources beforehand
         self._read_sources()
 
@@ -147,6 +153,48 @@ class LocalConfig(object):
 
         return all_read
 
+    def _preprocess_config(self, content):
+        """
+        Preprocess config content to extract type hints and convert to standard format.
+
+        Converts lines like 'key: type = value' to 'key = value' for ConfigParser,
+        while storing type hints separately.
+
+        :param str content: Raw config content
+        :return: Tuple of (processed_content, type_hints_dict)
+        """
+        lines = content.split('\n')
+        processed_lines = []
+        type_hints = {}
+        current_section = ''
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Track current section
+            if stripped.startswith('[') and stripped.endswith(']'):
+                current_section = stripped[1:-1]
+                processed_lines.append(line)
+                continue
+
+            # Check for type-annotated config: key: type = value
+            type_match = CONFIG_KEY_TYPE_RE.match(stripped)
+            if type_match:
+                key = type_match.group(1).strip()
+                type_hint = type_match.group(2).strip()
+                value = type_match.group(3).strip()
+
+                # Store type hint
+                type_hints[(current_section, key)] = type_hint
+
+                # Convert to standard format, preserving indentation
+                indent = len(line) - len(line.lstrip())
+                processed_lines.append(' ' * indent + key + ' = ' + value)
+            else:
+                processed_lines.append(line)
+
+        return '\n'.join(processed_lines), type_hints
+
     def _read(self, source):
         """
         Reads and parses the config source
@@ -157,16 +205,25 @@ class LocalConfig(object):
         """
 
         if isinstance(source, str) and is_config(source):
-            source_fp = StringIO(source)
+            content = source
         elif isinstance(source, IOBase) or isinstance(source, StringIO):
-            source_fp = source
+            content = source.read()
+            source.seek(0)  # Reset for _parse_extra
         elif os.path.exists(source):
-            source_fp = open(source)
+            with open(source) as f:
+                content = f.read()
         else:
             return False
 
-        self._parser.read_file(source_fp)
-        self._parse_extra(source_fp)
+        # Preprocess to extract type hints and convert to standard format
+        processed_content, type_hints = self._preprocess_config(content)
+        self._type_hints.update(type_hints)
+
+        # Parse the processed content
+        self._parser.read_file(StringIO(processed_content))
+
+        # Parse comments and dot keys from original content
+        self._parse_extra(StringIO(content))
 
         return True
 
@@ -198,7 +255,13 @@ class LocalConfig(object):
                 if (section, key) in self._comments:
                     output.append(self._comments[(section, key)])
                 value = ('\n' + ' ' * self._indent_spaces).join(value.split('\n'))
-                output.append('%s%s%s%s' % (key, self._kv_sep, value, extra_newline))
+
+                # Include type hint if present
+                if (section, key) in self._type_hints:
+                    type_hint = self._type_hints[(section, key)]
+                    output.append('%s: %s%s%s%s' % (key, type_hint, self._kv_sep, value, extra_newline))
+                else:
+                    output.append('%s%s%s%s' % (key, self._kv_sep, value, extra_newline))
 
         if self.LAST_COMMENT_KEY in self._comments:
             output.append(self._comments[self.LAST_COMMENT_KEY])
@@ -234,7 +297,7 @@ class LocalConfig(object):
             fp.write(output)
 
     def _parse_extra(self, fp):
-        """ Parse and store the config comments and create maps for dot notion lookup """
+        """ Parse and store the config comments, type hints, and create maps for dot notion lookup """
 
         comment = ''
         section = ''
@@ -258,11 +321,22 @@ class LocalConfig(object):
                 if comment:
                     self._comments[section] = comment.rstrip()
 
-            elif CONFIG_KEY_RE.match(line):  # Config
-                key = line.split('=', 1)[0].strip()
-                self._add_dot_key(section, key)
-                if comment:
-                    self._comments[(section, key)] = comment.rstrip()
+            else:
+                # Check for type-annotated config: key: type = value
+                type_match = CONFIG_KEY_TYPE_RE.match(line)
+                if type_match:
+                    key = type_match.group(1).strip()
+                    type_hint = type_match.group(2).strip()
+                    self._add_dot_key(section, key)
+                    self._type_hints[(section, key)] = type_hint
+                    if comment:
+                        self._comments[(section, key)] = comment.rstrip()
+
+                elif CONFIG_KEY_RE.match(line):  # Config without type hint
+                    key = line.split('=', 1)[0].strip()
+                    self._add_dot_key(section, key)
+                    if comment:
+                        self._comments[(section, key)] = comment.rstrip()
 
             comment = ''
 
@@ -281,6 +355,7 @@ class LocalConfig(object):
         """
         # self._read_sources()
 
+        original_section = section
         if (section, key) in self._dot_keys:
             section, key = self._dot_keys[(section, key)]
 
@@ -289,13 +364,13 @@ class LocalConfig(object):
         except configparser.NoOptionError:
             if raise_not_found:
                 raise ValueError('Argument "{}" was not found in config under section "{}"!'.format(key, section))
-            
+
             else:
                 return None
 
-        return self._typed_value(value, key=key)
+        return self._typed_value(value, key=key, section=section)
 
-    def set(self, section, key, value, comment=None, raise_unknown_key=RAISE_ERROR_WHEN_NEW_KEY):
+    def set(self, section, key, value, comment=None, raise_unknown_key=RAISE_ERROR_WHEN_NEW_KEY, type_hint=None):
         """
         Set config value with data type transformation (to str)
 
@@ -303,6 +378,7 @@ class LocalConfig(object):
         :param str key: Key to set config for
         :param value: Value for key. It can be any primitive type.
         :param str comment: Comment for the key
+        :param str type_hint: Optional type hint (e.g., 'int', 'Optional[str]')
         """
 
         # self._read_sources()
@@ -317,12 +393,14 @@ class LocalConfig(object):
 
         if raise_unknown_key and key not in [l[0] for l in list(self.items(section))]:
             raise ValueError('provided key "{}" is not in section "{}"!'.format(key, section))
-        
+
         self._parser.set(section, key, value)
 
         self._add_dot_key(section, key)
         if comment:
             self._set_comment(section, comment, key)
+        if type_hint:
+            self.set_type_hint(section, key, type_hint)
 
     def _read_sources(self):
         if self._sources_read:
@@ -336,24 +414,30 @@ class LocalConfig(object):
 
         self._sources_read = True
 
-    def _typed_value(self, value, key):
+    def _typed_value(self, value, key, section=None):
         """ Transform string value to an actual data type of the same value. """
 
-        if value not in self._value_cache:
+        cache_key = (section, key, value) if section else value
+
+        if cache_key not in self._value_cache:
             try:
                 if key == 'name':
                     new_value = str(value)
-                
                 else:
                     new_value = eval(value)
-            
+
             except NameError:
                 # string thought as variable name
                 new_value = value
-                        
-            self._value_cache[value] = new_value
 
-        return self._value_cache[value]
+            # Validate against type hint if present
+            if section and (section, key) in self._type_hints:
+                type_hint = self._type_hints[(section, key)]
+                validate_type(new_value, type_hint)
+
+            self._value_cache[cache_key] = new_value
+
+        return self._value_cache[cache_key]
 
     def __getattr__(self, section):
         """
@@ -440,12 +524,13 @@ class LocalConfig(object):
         """
         # self._read_sources()
 
+        original_section = section
         if section in self._dot_keys:
             section = self._dot_keys[section]
 
         for item in self._parser.items(section):
             key, value = item
-            value = self._typed_value(value, key=key)
+            value = self._typed_value(value, key=key, section=section)
             yield (key, value)
             
     def update(self, params):
@@ -472,19 +557,50 @@ class LocalConfig(object):
     def to_dict(self):
         output_dict = {}
         sections = list(self._parser.keys())[1:]  # Ignore default
-        
+
         for section in sections:
             items = self._parser.items(section)
             output_dict[section] = {}
-            
+
             for item in items:
                 key, value = item
-                value = self._typed_value(value, key=key)
-                
+                value = self._typed_value(value, key=key, section=section)
+
                 # Add element to dict
                 output_dict[section][key] = value
-                
+
         return output_dict
+
+    def get_type_hint(self, section, key):
+        """
+        Get the type hint for a config key, if one exists.
+
+        :param str section: Section name
+        :param str key: Key name
+        :return: Type hint string or None if no type hint is defined
+        """
+        if (section, key) in self._dot_keys:
+            section, key = self._dot_keys[(section, key)]
+
+        return self._type_hints.get((section, key))
+
+    def set_type_hint(self, section, key, type_hint):
+        """
+        Set a type hint for a config key.
+
+        :param str section: Section name
+        :param str key: Key name
+        :param str type_hint: Type hint string (e.g., 'int', 'Optional[str]', 'list[float]')
+        """
+        if (section, key) in self._dot_keys:
+            section, key = self._dot_keys[(section, key)]
+        elif section in self._dot_keys:
+            section = self._dot_keys[section]
+
+        # Validate type hint is parseable
+        parse_type_hint(type_hint)
+
+        self._type_hints[(section, key)] = type_hint
 
     def save_config(self, logfile):
         # For simplicity and clarity of use, it will be saved inside logdir (config must have "name" argument), else in main folder
