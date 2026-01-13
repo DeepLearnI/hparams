@@ -42,6 +42,34 @@ some_other_param = some_other_value
 
 ```
 
+### Type Hints
+
+You can add optional type hints to your config values for validation:
+
+```ini
+[model]
+batch_size: int = 32
+learning_rate: float = 1e-3
+model_name: str = resnet50
+use_cuda: bool = True
+layer_sizes: list[int] = [64, 128, 256]
+
+[training]
+# Optional value (can be None)
+warmup_steps: int | None = 1000
+
+# Union types
+seed: int | str = 42
+```
+
+Supported types:
+- Basic: `int`, `float`, `str`, `bool`, `list`, `dict`
+- Optional: `Optional[int]` or `int | None`
+- Union: `int | str | None`
+- Generic: `list[int]`, `list[float]`
+
+Type validation happens when accessing values - a `TypeError` is raised if the value doesn't match the declared type.
+
 #### Notes:
 
 - `run.name` parameter is mandatory in any `.cfg` to be read by hparams library.
@@ -113,3 +141,24 @@ hparams = HParams('.', gcs_backup_project='some_project_name', gcs_backup_bucket
 The GCS integration of hparams is a simple backup copy. Your local version is always the True one, and the gcs version is its replica.
 
 The GCS backup also automatically appends the run name to the end of the gcs bucket path.
+
+## Editor Support
+
+### VSCode
+
+A syntax highlighting extension is included for `.cfg` files with type hint support.
+
+To install, copy the extension to your VSCode extensions folder:
+
+```bash
+# Linux / WSL / Remote SSH
+cp -r editors/vscode ~/.vscode-server/extensions/hparams-syntax
+
+# macOS
+cp -r editors/vscode ~/.vscode/extensions/hparams-syntax
+
+# Windows (PowerShell)
+Copy-Item -Recurse editors/vscode $env:USERPROFILE\.vscode\extensions\hparams-syntax
+```
+
+Then reload VSCode (`Cmd+Shift+P` → "Developer: Reload Window").
