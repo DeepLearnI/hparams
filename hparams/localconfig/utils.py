@@ -64,7 +64,7 @@ def _is_type(value, type):
 
 def parse_type_hint(type_str: str) -> tuple:
     """
-    Parse a type hint string into a tuple of (base_types, is_optional, inner_type).
+    Parse a type hint string into a tuple of (base_types, is_optional, inner_types).
 
     Examples:
         'int' -> ([int], False, None)
@@ -72,18 +72,19 @@ def parse_type_hint(type_str: str) -> tuple:
         'int | None' -> ([int], True, None)
         'int | str' -> ([int, str], False, None)
         'int | str | None' -> ([int, str], True, None)
-        'list[int]' -> ([list], False, int)
-        'Optional[list[str]]' -> ([list], True, str)
+        'list[int]' -> ([list], False, (int,))
+        'dict[str, int]' -> ([dict], False, (str, int))
+        'Optional[list[str]]' -> ([list], True, (str,))
 
     Returns:
-        (base_types, is_optional, inner_type) where:
+        (base_types, is_optional, inner_types) where:
         - base_types: List of allowed Python types
         - is_optional: Whether None is allowed
-        - inner_type: For generic types like list[int], the inner type
+        - inner_types: Tuple of inner types for generics (e.g., (int,) for list[int], (str, int) for dict[str, int])
     """
     type_str = type_str.strip()
     is_optional = False
-    inner_type = None
+    inner_types = None
 
     # Handle pipe union syntax: int | str | None
     if '|' in type_str:
@@ -102,7 +103,7 @@ def parse_type_hint(type_str: str) -> tuple:
         if not base_types:
             raise TypeError(f"Union type must have at least one non-None type: {type_str}")
 
-        return (base_types, is_optional, inner_type)
+        return (base_types, is_optional, inner_types)
 
     # Handle Optional[X]
     if type_str.startswith('Optional[') and type_str.endswith(']'):
@@ -118,19 +119,25 @@ def parse_type_hint(type_str: str) -> tuple:
         if base_type is None:
             raise TypeError(f"Unknown type: {base_name}")
 
-        # Parse inner type (simplified - just take first type for list)
-        inner_parts = inner_str.split(',')
-        inner_name = inner_parts[0].strip()
-        inner_type = TYPE_MAP.get(inner_name.lower())
+        # Parse inner types
+        inner_parts = [p.strip() for p in inner_str.split(',')]
+        inner_types = tuple(
+            TYPE_MAP.get(p.lower()) for p in inner_parts
+        )
 
-        return ([base_type], is_optional, inner_type)
+        # Validate all inner types are known
+        for i, (part, typ) in enumerate(zip(inner_parts, inner_types)):
+            if typ is None:
+                raise TypeError(f"Unknown inner type: {part}")
+
+        return ([base_type], is_optional, inner_types)
 
     # Simple type
     base_type = TYPE_MAP.get(type_str.lower())
     if base_type is None:
         raise TypeError(f"Unknown type: {type_str}")
 
-    return ([base_type], is_optional, inner_type)
+    return ([base_type], is_optional, inner_types)
 
 
 def validate_type(value: Any, type_hint: str) -> bool:
@@ -139,7 +146,7 @@ def validate_type(value: Any, type_hint: str) -> bool:
 
     Args:
         value: The Python value to validate
-        type_hint: The type hint string (e.g., 'int', 'Optional[str]', 'list[int]', 'int | str')
+        type_hint: The type hint string (e.g., 'int', 'Optional[str]', 'list[int]', 'dict[str, int]')
 
     Returns:
         True if value matches the type hint
@@ -147,7 +154,7 @@ def validate_type(value: Any, type_hint: str) -> bool:
     Raises:
         TypeError: If value doesn't match the declared type
     """
-    base_types, is_optional, inner_type = parse_type_hint(type_hint)
+    base_types, is_optional, inner_types = parse_type_hint(type_hint)
 
     # Handle None values
     if value is None:
@@ -177,16 +184,37 @@ def validate_type(value: Any, type_hint: str) -> bool:
             f"(value: {repr(value)})"
         )
 
-    # Check inner type for lists
-    if inner_type is not None and matched_type == list:
+    # Check inner types for lists
+    if inner_types is not None and matched_type == list:
+        item_type = inner_types[0]
         for i, item in enumerate(value):
-            if not isinstance(item, inner_type):
+            if not isinstance(item, item_type):
                 # Allow int items in float lists
-                if inner_type == float and isinstance(item, int):
+                if item_type == float and isinstance(item, int):
                     continue
                 raise TypeError(
-                    f"List item at index {i} expected {inner_type.__name__}, "
+                    f"List item at index {i} expected {item_type.__name__}, "
                     f"got {type(item).__name__} (value: {repr(item)})"
+                )
+
+    # Check inner types for dicts
+    if inner_types is not None and matched_type == dict:
+        key_type = inner_types[0] if len(inner_types) > 0 else None
+        value_type = inner_types[1] if len(inner_types) > 1 else None
+
+        for k, v in value.items():
+            if key_type is not None and not isinstance(k, key_type):
+                raise TypeError(
+                    f"Dict key expected {key_type.__name__}, "
+                    f"got {type(k).__name__} (key: {repr(k)})"
+                )
+            if value_type is not None and not isinstance(v, value_type):
+                # Allow int values in float dicts
+                if value_type == float and isinstance(v, int):
+                    continue
+                raise TypeError(
+                    f"Dict value for key {repr(k)} expected {value_type.__name__}, "
+                    f"got {type(v).__name__} (value: {repr(v)})"
                 )
 
     return True
@@ -206,7 +234,7 @@ def coerce_to_type(value: Any, type_hint: str) -> Any:
     Raises:
         TypeError: If coercion is not possible
     """
-    base_types, is_optional, inner_type = parse_type_hint(type_hint)
+    base_types, is_optional, inner_types = parse_type_hint(type_hint)
 
     # Handle None
     if value is None:

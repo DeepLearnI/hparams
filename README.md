@@ -66,7 +66,7 @@ Supported types:
 - Basic: `int`, `float`, `str`, `bool`, `list`, `dict`
 - Optional: `Optional[int]` or `int | None`
 - Union: `int | str | None`
-- Generic: `list[int]`, `list[float]`
+- Generic: `list[int]`, `list[str]`, `dict[str, int]`, `dict[str, float]`
 
 Type validation happens when accessing values - a `TypeError` is raised if the value doesn't match the declared type.
 
