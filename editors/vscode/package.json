@@ -1,0 +1,24 @@
+{
+    "name": "hparams-syntax",
+    "displayName": "HParams Config Syntax",
+    "description": "Syntax highlighting for hparams.cfg files with type hints",
+    "version": "0.1.0",
+    "publisher": "local",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": ["Programming Languages"],
+    "contributes": {
+        "languages": [{
+            "id": "hparams",
+            "aliases": ["HParams Config", "hparams"],
+            "extensions": [".cfg"],
+            "configuration": "./language-configuration.json"
+        }],
+        "grammars": [{
+            "language": "hparams",
+            "scopeName": "source.hparams",
+            "path": "./syntaxes/hparams.tmLanguage.json"
+        }]
+    }
+}

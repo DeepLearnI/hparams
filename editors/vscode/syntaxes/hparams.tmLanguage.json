@@ -1,0 +1,124 @@
+{
+    "name": "HParams Config",
+    "scopeName": "source.hparams",
+    "fileTypes": ["cfg"],
+    "patterns": [
+        { "include": "#comment" },
+        { "include": "#section" },
+        { "include": "#typed-key-value" },
+        { "include": "#key-value" }
+    ],
+    "repository": {
+        "comment": {
+            "match": "^\\s*(#.*)$",
+            "captures": {
+                "1": { "name": "comment.line.number-sign.hparams" }
+            }
+        },
+        "section": {
+            "match": "^\\s*(\\[)([^\\]]+)(\\])\\s*$",
+            "captures": {
+                "1": { "name": "punctuation.definition.section.begin.hparams" },
+                "2": { "name": "entity.name.section.hparams" },
+                "3": { "name": "punctuation.definition.section.end.hparams" }
+            }
+        },
+        "typed-key-value": {
+            "match": "^\\s*([A-Za-z0-9_.-]+)\\s*(:)\\s*([A-Za-z0-9_\\[\\],\\s|]+)\\s*(=)\\s*(.*)$",
+            "captures": {
+                "1": { "name": "variable.other.key.hparams" },
+                "2": { "name": "punctuation.separator.annotation.hparams" },
+                "3": { "name": "entity.name.type.hparams" },
+                "4": { "name": "keyword.operator.assignment.hparams" },
+                "5": {
+                    "patterns": [
+                        { "include": "#value-patterns" }
+                    ]
+                }
+            }
+        },
+        "key-value": {
+            "match": "^\\s*([A-Za-z0-9_.-]+)\\s*(=)\\s*(.*)$",
+            "captures": {
+                "1": { "name": "variable.other.key.hparams" },
+                "2": { "name": "keyword.operator.assignment.hparams" },
+                "3": {
+                    "patterns": [
+                        { "include": "#value-patterns" }
+                    ]
+                }
+            }
+        },
+        "value-patterns": {
+            "patterns": [
+                {
+                    "name": "constant.language.boolean.true.hparams",
+                    "match": "\\b(True|true|yes|on)\\b"
+                },
+                {
+                    "name": "constant.language.boolean.false.hparams",
+                    "match": "\\b(False|false|no|off)\\b"
+                },
+                {
+                    "name": "constant.language.null.hparams",
+                    "match": "\\b(None|null)\\b"
+                },
+                {
+                    "name": "constant.numeric.float.hparams",
+                    "match": "-?\\b[0-9]*\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+                },
+                {
+                    "name": "constant.numeric.scientific.hparams",
+                    "match": "-?\\b[0-9]+[eE][+-]?[0-9]+\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.hparams",
+                    "match": "-?\\b[0-9]+\\b"
+                },
+                {
+                    "name": "string.quoted.double.hparams",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        { "name": "constant.character.escape.hparams", "match": "\\\\." }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.hparams",
+                    "begin": "'",
+                    "end": "'",
+                    "patterns": [
+                        { "name": "constant.character.escape.hparams", "match": "\\\\." }
+                    ]
+                },
+                {
+                    "name": "meta.structure.list.hparams",
+                    "begin": "\\[",
+                    "beginCaptures": { "0": { "name": "punctuation.definition.list.begin.hparams" } },
+                    "end": "\\]",
+                    "endCaptures": { "0": { "name": "punctuation.definition.list.end.hparams" } },
+                    "patterns": [
+                        { "include": "#value-patterns" },
+                        { "name": "punctuation.separator.comma.hparams", "match": "," }
+                    ]
+                },
+                {
+                    "name": "meta.structure.dict.hparams",
+                    "begin": "\\{",
+                    "beginCaptures": { "0": { "name": "punctuation.definition.dict.begin.hparams" } },
+                    "end": "\\}",
+                    "endCaptures": { "0": { "name": "punctuation.definition.dict.end.hparams" } },
+                    "patterns": [
+                        { "include": "#value-patterns" },
+                        { "name": "punctuation.separator.colon.hparams", "match": ":" },
+                        { "name": "punctuation.separator.comma.hparams", "match": "," }
+                    ]
+                },
+                {
+                    "name": "string.unquoted.hparams",
+                    "match": "[A-Za-z_][A-Za-z0-9_]*"
+                }
+            ]
+        }
+    }
+}
